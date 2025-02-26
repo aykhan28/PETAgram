@@ -34,8 +34,10 @@ class AuthController extends GetxController {
         photoURL: '',
       );
 
+      // Kullanıcı Firestore'a ekleniyor
       await _firestore.collection('users').doc(uid).set(newUser.toMap());
 
+      // Firebase Auth üzerinde isim güncelleniyor
       await userCredential.user!.updateDisplayName(name);
 
       Get.offAllNamed('/home');
@@ -46,11 +48,16 @@ class AuthController extends GetxController {
 
   /// Firestore'dan Kullanıcı Bilgilerini Al
   Future<UserModel?> getUserData() async {
-    DocumentSnapshot userDoc = await _firestore.collection('users').doc(user?.uid).get();
-    if (userDoc.exists) {
-      return UserModel.fromMap(userDoc.data() as Map<String, dynamic>);
+    try {
+      DocumentSnapshot userDoc = await _firestore.collection('users').doc(user?.uid).get();
+      if (userDoc.exists) {
+        return UserModel.fromMap(userDoc.data() as Map<String, dynamic>);
+      }
+      return null;
+    } catch (e) {
+      Get.snackbar('Error', 'Failed to load user data.');
+      return null;
     }
-    return null;
   }
 
   /// Kullanıcı Çıkışı
@@ -64,14 +71,18 @@ class AuthController extends GetxController {
     try {
       if (user == null) return;
 
+      // Kullanıcıyı tekrar kimlik doğrulama
       AuthCredential credential = EmailAuthProvider.credential(
         email: user!.email!,
         password: password,
       );
       await user!.reauthenticateWithCredential(credential);
 
-      await user!.delete();
+      // Firestore'dan kullanıcıyı sil
       await _firestore.collection('users').doc(user!.uid).delete();
+
+      // Kullanıcıyı Firebase Authentication'dan sil
+      await user!.delete();
 
       Get.offAllNamed('/register');
       Get.snackbar('Account Deleted', 'Your account has been deleted successfully.');

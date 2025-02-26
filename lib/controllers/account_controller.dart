@@ -30,15 +30,26 @@ class AccountController extends GetxController {
   Future<void> loadUserData() async {
     isLoading.value = true;
     try {
-      DocumentSnapshot userDoc = await _firestore.collection('users').doc(_auth.currentUser?.uid).get();
+      String? userId = _auth.currentUser?.uid;
+      if (userId == null) {
+        throw Exception("User not logged in.");
+      }
+
+      DocumentSnapshot userDoc =
+          await _firestore.collection('users').doc(userId).get();
       if (userDoc.exists && userDoc.data() != null) {
-        userModel.value = UserModel.fromMap(userDoc.data() as Map<String, dynamic>);
+        userModel.value =
+            UserModel.fromMap(userDoc.data() as Map<String, dynamic>);
         _updateTextControllers();
+      } else {
+        throw Exception("User data not found in Firestore.");
       }
     } catch (e) {
-      Get.snackbar('Error', 'Failed to load user data.');
+      print("🔥 Error loading user data: $e");
+      Get.snackbar('Error', 'Failed to load user data: ${e.toString()}');
+    } finally {
+      isLoading.value = false;
     }
-    isLoading.value = false;
   }
 
   void _updateTextControllers() {
@@ -50,7 +61,8 @@ class AccountController extends GetxController {
   }
 
   /// Kullanıcı Bilgilerini Güncelle (Firestore ve Auth)
-  Future<void> updateUserInfo(String name, String email, String phone, String currentPassword) async {
+  Future<void> updateUserInfo(
+      String name, String email, String phone, String currentPassword) async {
     if (_auth.currentUser == null) return;
 
     try {
@@ -70,7 +82,8 @@ class AccountController extends GetxController {
       await loadUserData();
       Get.snackbar('Success', 'Your information has been updated.');
     } catch (e) {
-      Get.snackbar('Error', 'An error occurred.');
+      print("🔥 Error updating user info: $e");
+      Get.snackbar('Error', 'An error occurred while updating your info.');
     }
   }
 
@@ -106,7 +119,8 @@ class AccountController extends GetxController {
   /// Profil Fotoğrafını Güncelle
   Future<void> updateProfilePicture() async {
     final ImagePicker picker = ImagePicker();
-    final XFile? pickedFile = await picker.pickImage(source: ImageSource.gallery);
+    final XFile? pickedFile =
+        await picker.pickImage(source: ImageSource.gallery);
     if (pickedFile == null) return;
 
     File imageFile = File(pickedFile.path);
@@ -114,24 +128,29 @@ class AccountController extends GetxController {
     String filePath = 'profile_pictures/${_auth.currentUser!.uid}.$ext';
 
     try {
-      img.Image? image = img.decodeImage(await imageFile.readAsBytes());
-      if (image != null) {
-        image = img.copyResize(image, width: 500);
-        File compressedFile = File(pickedFile.path)
-          ..writeAsBytesSync(img.encodeJpg(image, quality: 80));
-        imageFile = compressedFile;
+      print("📤 Resim Firebase'e yükleniyor: $filePath");
+
+      Reference storageRef = FirebaseStorage.instance.ref(filePath);
+      UploadTask uploadTask = storageRef.putFile(imageFile);
+
+      TaskSnapshot snapshot = await uploadTask.whenComplete(() {});
+      if (snapshot.state == TaskState.success) {
+        String downloadUrl = await snapshot.ref.getDownloadURL();
+
+        await _auth.currentUser!.updatePhotoURL(downloadUrl);
+        await _firestore
+            .collection('users')
+            .doc(_auth.currentUser!.uid)
+            .update({'photoURL': downloadUrl});
+
+        await loadUserData();
+        Get.snackbar('Success', 'Profile picture updated!');
+      } else {
+        throw Exception("Upload failed.");
       }
-
-      await _storage.ref(filePath).putFile(imageFile);
-      String downloadUrl = await _storage.ref(filePath).getDownloadURL();
-
-      await _auth.currentUser!.updatePhotoURL(downloadUrl);
-      await _firestore.collection('users').doc(_auth.currentUser!.uid).update({'photoURL': downloadUrl});
-
-      await loadUserData();
-      Get.snackbar('Success', 'Profile picture updated!');
     } catch (e) {
-      Get.snackbar('Error', 'Failed to upload image.');
+      print("🔥 Error uploading image: $e");
+      Get.snackbar('Error', 'Failed to upload image: ${e.toString()}');
     }
   }
 
@@ -155,7 +174,9 @@ class AccountController extends GetxController {
       await _firestore.collection('users').doc(_auth.currentUser!.uid).delete();
 
       try {
-        await _storage.ref('profile_pictures/${_auth.currentUser!.uid}.jpg').delete();
+        await _storage
+            .ref('profile_pictures/${_auth.currentUser!.uid}.jpg')
+            .delete();
       } catch (e) {
         print('Profile picture not found or already deleted.');
       }
@@ -165,7 +186,8 @@ class AccountController extends GetxController {
       Get.offAllNamed('/register');
       Get.snackbar('Account Deleted', 'Your account has been deleted.');
     } catch (e) {
-      Get.snackbar('Error', 'An error occurred.');
+      print("🔥 Error deleting account: $e");
+      Get.snackbar('Error', 'An error occurred while deleting your account.');
     }
   }
 }
